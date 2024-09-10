@@ -1,10 +1,3 @@
-/*---------------- File: main.cpp  ---------------------+
-|Modelo PLI - Mochila 01                                |
-|					      		                        |
-|					      		                        |
-| Implementado por Guilherme C. Pena em 28/08/2024      |
-+-------------------------------------------------------+ */
-
 #include <bits/stdc++.h>
 #include <ilcplex/ilocplex.h>
 
@@ -28,20 +21,22 @@ ILOSTLBEGIN //MACRO - "using namespace" for ILOCPEX
 * Default: 0
 */
 
-//Struct para um Nó do PFCM
-struct item{
-    int origem, destino, capacidade;
+//Struct para um item da mochila 01
+struct aresta{
+    int origem, destino, capacidade, max;
 };
 
 struct no {
-	int quantidade, tipo;
+	int numero, capacidade;
 };
 
 //Conjuntos do Problema
-int N; //Quantidade de Nós
-vector<item> itens; //Conjunto dos itens
-vector<no> nos;
-int A; //Quantidade de Arestas
+vector<vector<int>> V; //Matriz de adjacencia
+vector<aresta> arestas; //Conjunto de arestas
+vector<no> origens;
+vector<no> destinos;
+vector<no> trans;
+int N, M, o, d, t; //Numero de vertices, arestas, Origens, Destinos e Transbordo
 
 void cplex(){
     //CPLEX
@@ -55,34 +50,17 @@ void cplex(){
 
 	//---------- MODELAGEM ---------------
 
-	//VARIAVEIS DE DECISAO (x_i) binaria
-	/*
-	IloNumVarArray x(env);
-	for( i = 0; i < N; i++ ){
-		x.add(IloIntVar(env, 0, 1));
-		numberVar++;
-	}
-	*/
-
-	//AJUDA
-	/*
-	//Definicao - Variaveis de Decisao 2 dimensoes (x_ij) binarias
-	IloArray<IloNumVarArray> x(env);
-	for( i = 0; i < N; i++ ){
-		x.add(IloNumVarArray>(env));
-		for( j = 0; j < N; j++ ){
-			x[i].add(IloIntVar(env, 0, 1));
-			numberVar++;
-		}
-	}
-	*/
-	//Definicao - Variaveis de Decisao 2 dimensoes (x_ij) não binárias (discretas)
-	IloArray<IloNumVarArray> x(env);
-		for( j = 0; j < A; j++ ){
-			x[i].add(IloIntVar(env, 0, CPX_MAXINT));
-			numberVar++;
-		}
-	
+	//Definicao - Variaveis de decisao: Unidades transportadas de i para j
+	IloArray<IloNumVarArray> x(env, N);
+    for (i = 0; i < N; i++) {
+        x[i] = IloNumVarArray(env, N, 0, IloInfinity);
+        for (j = 0; j < N; j++) {
+            if (V[i][j]) {            
+                x[i][j] = IloNumVar(env, 0, IloInfinity);
+                numberVar++;
+            }
+        }
+    }
 	
 
 	//Definicao do ambiente modelo ------------------------------------------
@@ -90,75 +68,105 @@ void cplex(){
 	
 	//Definicao do ambiente expressoes, para os somatorios ---------------------------------
 	//Nota: Os somatorios podem ser reaproveitados usando o .clear(),
-	//com excecao de quando existe mais de um somatorio em uma mesma restricao.
+	//com excecao de quando existe mais de um somatorio em uma mesma restricao
 	IloExpr sum(env); /// Expression for Sum
 	IloExpr sum2(env); /// Expression for Sum2
 
 	//FUNCAO OBJETIVO ---------------------------------------------
 	sum.clear();
-	for( i = 0; i < A; i++ ){
-		sum += (itens[i].capacidade * x[i]);
+	for( i = 0; i < M; i++ ){
+		sum += (arestas[i].capacidade * x[arestas[i].origem][arestas[i].destino]);
+		//printf("Arestas (%d -> %d) Capacidade: %d\n", arestas[i].origem, arestas[i].destino, arestas[i].capacidade);
 	}
-	//model.add(IloMaximize(env, sum)); //Maximizacao
-
-	//AJUDA
+	
 	//Modelo de Minimizacao
 	model.add(IloMinimize(env, sum)); //Minimizacao
 
 	//RESTRICOES ---------------------------------------------	
-	 
-	//R1 - Respeito da capacidade de Mochila
-	/*
+		 
+	//R1 - Restrições da origem
 	sum.clear();
-	for( i = 0; i < A; i++ ){
-		sum += (itens[i].c * x[i]);
-	}
-	model.add(sum <= B); 
-	numberRes++;
-	*/			
+    sum2.clear();
+	for( i = 0; i < o; i++ ){
 
-
-	//AJUDA - Restricoes
-	/*//
-	Vou exemplificar uma situação em que a restrição contém somatórios independentes
-	e contém um (Para Todo na direita)
-	Nesse caso, o índice do (Para Todo) fica em um laço externo à restrição.
-	Gerando assim, várias restrições para tal.
-	
-	Exemplo: 
-	Restrição de Oferta (2) do PFCM:
-	S (maiusculo) é um conjunto de origens, cada uma com uma qntd. de oferta Q (maiusculo).
-	Supondo que temos os nós em S = {0 1 3} e 
-	Q[0] = 10, Q[1] = 10 e Q[3] = 20 (ofertas individuais)
-
-	//- A restrição é escrita assim para o ILOG CPLEX, basta fazer o teste de existência da aresta:
-	//- Ou seja, se existe a aresta, então a variável entra no respectivo somatório.
-	*/
-	int noAtual = 1;
-	for(i=0; i<=N; i++){ // For que representa o (Para Todo).
-		sum.clear(); //Somatório 1
-		for( j = 0; j < A; j++ ){
-			if(itens[j].origem == noAtual){ //Saída do nó
-				sum += (itens[j].capacidade * x[j]);
-			} else if (itens[j].destino != noAtual){ //Chegada no nó
-				sum2 += (itens[j].capacidade * x[j]);
-			}
-			//Destino = Chegada - Saída >=  Tipo demanda é 1
-			if(nos[i].tipo == 1){
-				model.add(sum2 - sum >= nos[i].quantidade);
-			//Origem = Saída - Chegada <=  Tipo oferta é 0	
-			} else {
-				model.add(sum - sum2 <= nos[i].quantidade);
-			}
-			
+        //Saida da origem
+		for(j = 0; j < M; j++){
+			if(arestas[j].origem == origens[i].numero){
+				sum += x[arestas[j].origem][arestas[j].destino];
+				printf("Arestas (%d -> %d\n) Origens: %d\n", arestas[j].origem, arestas[j].destino, origens[i].numero);
+			}	
 		}
-		noAtual++;
+
+        //Chegada na origem
+        for(j = 0; j < M; j++){
+			if(arestas[j].destino == origens[i].numero){
+				sum2 += x[arestas[j].origem][arestas[j].destino];
+			}	
+		}
+        
+		model.add(sum - sum2 <= origens[i].capacidade); //Saida - Chegada <= C
+		sum.clear();
+        sum2.clear(); 
 		numberRes++;
-	}//Fim do for que representa o (Para Todo).
-	/*
-	Note que por esse exemplo, 3 restrições são adicionadas ao modelo
-	por causa do tamanho do conjunto S, uma para cada vértice origem.
-	*/
+	}
+
+	//Restrições do destino
+
+	sum.clear();
+    sum2.clear();
+	for( i = 0; i < d; i++ ){
+		for(j = 0; j < M; j++){
+            //Chegada
+			if(arestas[j].destino == destinos[i].numero){
+				sum += x[arestas[j].origem][arestas[j].destino];
+                printf("Arestas (%d -> %d\n) Destino: %d\n", arestas[j].origem, arestas[j].destino, destinos[i].numero);
+			}	
+		}
+
+        for(j = 0; j < M; j++){
+            //Saida
+			if(arestas[j].origem == destinos[i].numero){
+				sum2 += x[arestas[j].origem][arestas[j].destino];
+			}	
+		}
+
+		model.add(sum - sum2 >= destinos[i].capacidade); //Chegada - Saida >= C
+        sum2.clear();
+		sum.clear(); 
+		numberRes++;
+	}
+
+
+    sum.clear();
+    sum2.clear();
+    for( i = 0; i < t; i++ ){
+		for(j = 0; j < M; j++){
+            //Saida
+			if(arestas[j].origem == trans[i].numero){
+				sum += x[arestas[j].origem][arestas[j].destino];
+                printf("Arestas (%d -> %d\n) Trans: %d\n", arestas[j].origem, arestas[j].destino, trans[i].numero);
+			}	
+		}
+
+        for(j = 0; j < M; j++){
+            //Chegada
+			if(arestas[j].destino == trans[i].numero){
+				sum2 += x[arestas[j].origem][arestas[j].destino];
+			}	
+		}
+
+		model.add(sum2 - sum == 0); //Chegada - Saida == 0
+        sum2.clear();
+		sum.clear(); 
+		numberRes++;
+	}
+	
+    for(i=0; i<M; i++){
+        if(arestas[i].max != 0){
+            model.add(x[arestas[i].origem][arestas[i].destino] <= arestas[i].max);
+            numberRes++;
+        }
+    }
 
 
 	//------ EXECUCAO do MODELO ----------
@@ -230,10 +238,13 @@ void cplex(){
 		//float gap; gap = cplex.getMIPRelativeGap();
 		
 		cout << "Variaveis de decisao: " << endl;
-		for( i = 0; i < N; i++ ){
-			value = IloRound(cplex.getValue(x[i]));
-			printf("x[%d]: %.0lf\n", i, value);
-		}
+		for (i = 0; i < M; i++) {
+            if (cplex.getValue(x[arestas[i].origem][arestas[i].destino]) > 0) {
+                printf("Aresta (%d -> %d): Valor = %f\n", arestas[i].origem, arestas[i].destino, cplex.getValue(x[arestas[i].origem][arestas[i].destino]));
+            }
+        }
+
+
 		printf("\n");
 		
 		cout << "Funcao Objetivo Valor = " << objValue << endl;
@@ -257,35 +268,42 @@ int main(){
 	//Leitura dos dados:
 	//A partir de um arquivo (in.txt)
 	int i;
-	cin >> N >> A;
-	itens.resize(N);
-	int atual = 1;
-	int noscap = 0;
-	cin >> itens[0].origem >> itens[0].destino >> itens[0].capacidade >> nos[0].quantidade >> nos[0].tipo;
-	for(i=1; i<A; i++){
-		if (atual != itens[i].origem){
-			cin >> itens[i].origem >> itens[i].destino >> itens[i].capacidade >> nos[i].quantidade >> nos[i].tipo;
-			noscap++;
-			atual++;
-		} else cin >> itens[i].origem >> itens[i].destino >> itens[i].capacidade;
+	cin >> N >> M >> o >> d >> t;
+	arestas.resize(M);
+	V.resize(N, vector<int>(N, 0));
+	origens.resize(o);
+	destinos.resize(d);
+    trans.resize(t);
+
+	for(i=0; i<o; i++){
+		cin >> origens[i].numero >> origens[i].capacidade;
 	}
-	if(noscap != A){
-		for(int z = noscap; z<A; z++){
-			cin >> nos[i].quantidade >> nos[i].tipo;
-		}
+
+	for(i=0; i<d; i++){
+		cin >> destinos[i].numero >> destinos[i].capacidade;
+	}
+
+    for(i=0; i<t; i++){
+		cin >> trans[i].numero;
+	}
+
+	for(i=0; i<M; i++){
+		cin >> arestas[i].origem >> arestas[i].destino >> arestas[i].capacidade >> arestas[i].max;
+		V[arestas[i].origem][arestas[i].destino] = 1;
+		printf("Origem e destinos (arestas): %d %d\n", arestas[i].origem, arestas[i].destino);
+
 	}
 
 	printf("Verificacao da leitura dos dados:\n");
-	printf("Num. nos: %d\n", N);
-	printf("Num. arestas: %d\n", A);
-	printf("Arestas - origem, destino, capacidade\n");
-    for(i=0; i<A; i++)
-        printf("%d %d \n", itens[i].origem, itens[i].destino, itens[i].capacidade);
-	printf("Nos - quantidade, tipo\n");
-	for(i=0; i<N; i++)
-        printf("%d %d \n", nos[i].quantidade, nos[i].tipo);
+	printf("Num. Vertices: %d\n", N);
+	printf("Num. Arestas: %d\n", M);
+	printf("Origens - id: capacidade\n");
+    for(i=0; i<o; i++)
+        printf("%d: %d\n", origens[i].numero, origens[i].capacidade);
+	printf("Destinos - id: capacidade\n");
+    for(i=0; i<d; i++)
+        printf("%d: %d\n", destinos[i].numero, destinos[i].capacidade);
 	printf("\n");
-
 
 	cplex();
 
